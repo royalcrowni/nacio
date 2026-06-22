@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nacio</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #DFDBD5;
+    overflow: hidden;
+  }
+
+  .stage {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+  }
+
+  .hanger {
+    position: absolute;
+    top: 44%;
+    left: 50%;
+    transform-origin: top center;
+    transform: translate(-50%, -50%);
+    animation: sway 4.5s ease-in-out infinite;
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .hanger, .hanger * {
+    -webkit-user-drag: none;
+    -khtml-user-drag: none;
+    -moz-user-drag: none;
+    user-drag: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+  }
+
+  @keyframes sway {
+    0%   { transform: translate(-50%, -50%) rotate(-5deg); }
+    50%  { transform: translate(-50%, -50%) rotate(5deg); }
+    100% { transform: translate(-50%, -50%) rotate(-5deg); }
+  }
+
+  .hook {
+    display: block;
+    width: 10px;
+    margin: 0 auto;
+    pointer-events: none;
+    transform-origin: top center;
+  }
+
+  .frame {
+    display: block;
+    width: 36px;
+    margin-top: -1px;
+    pointer-events: none;
+    transform-origin: top center;
+  }
+
+  .hanger.dragging {
+    cursor: grabbing;
+  }
+
+  .signature {
+    position: absolute;
+    top: 70%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 0px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.8s ease, width 0.8s ease;
+  }
+
+  .signature.visible {
+    width: 55px;
+    opacity: 1;
+  }
+
+  .bill-rain {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  .bill {
+    position: absolute;
+    top: -120px;
+    width: 90px;
+    opacity: 0.9;
+    animation-name: fall, spin;
+    animation-timing-function: linear;
+    animation-iteration-count: 1;
+  }
+
+  @keyframes fall {
+    from { transform: translateY(0); }
+    to   { transform: translateY(115vh); }
+  }
+
+  @keyframes spin {
+    from { rotate: 0deg; }
+    to   { rotate: 360deg; }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="hanger" id="hanger">
+    <img class="hook" id="hook" src="lacio.svg" alt="" draggable="false">
+    <img class="frame" id="frame" src="nacio.svg" alt="" draggable="false">
+  </div>
+  <img class="signature" id="signature" src="nacio_.svg" alt="">
+</div>
+
+<div class="bill-rain" id="billRain"></div>
+
+<script>
+  const hanger = document.getElementById('hanger');
+  const hook = document.getElementById('hook');
+  const frame = document.getElementById('frame');
+  const signature = document.getElementById('signature');
+  const billRain = document.getElementById('billRain');
+  let clicks = 0;
+  let billsSpawned = false;
+
+  const MAX_DRAG = 115;
+  const CLICK_THRESHOLD = 4;
+  let hookHeightCache = hook.getBoundingClientRect().height || 1;
+  let dragging = false;
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let dragDist = 0;
+  let lastDx = 0;
+  let lastDy = 0;
+
+  function applyStretch(dx, dy, dist) {
+    const hookHeight = hookHeightCache;
+    // exact vector from the hook's fixed pivot to the frame's dragged attach point,
+    // so the stretched hook always lands precisely on the frame regardless of direction
+    const vx = dx;
+    const vy = hookHeight + dy;
+    const newLen = Math.sqrt(vx * vx + vy * vy);
+    const stretch = newLen / hookHeight;
+    const squeeze = Math.max(0.55, 1 - dist / 180);
+    const angle = dist > 0.5 ? Math.atan2(-vx, vy) * (180 / Math.PI) : 0;
+    hook.style.transform = `rotate(${angle}deg) scaleY(${stretch}) scaleX(${squeeze})`;
+    frame.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+
+  function easeOutElastic(t) {
+    const c4 = (2 * Math.PI) / 3;
+    return t <= 0 ? 0 : t >= 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+  }
+
+  let bounceFrameId = null;
+
+  function settleBack(dx0, dy0) {
+    if (bounceFrameId !== null) {
+      cancelAnimationFrame(bounceFrameId);
+      bounceFrameId = null;
+    }
+
+    hook.style.transition = 'none';
+    frame.style.transition = 'none';
+    hanger.classList.remove('dragging');
+
+    const duration = 900;
+    const startTime = performance.now();
+
+    function step(now) {
+      const t = Math.min((now - startTime) / duration, 1);
+      const eased = easeOutElastic(t);
+      const remaining = 1 - eased;
+      const curDx = dx0 * remaining;
+      const curDy = dy0 * remaining;
+      const curDist = Math.sqrt(curDx * curDx + curDy * curDy);
+      applyStretch(curDx, curDy, curDist);
+
+      if (t < 1) {
+        bounceFrameId = requestAnimationFrame(step);
+      } else {
+        applyStretch(0, 0, 0);
+        bounceFrameId = null;
+        // resume the idle sway now that the hanger is back at rest
+        hanger.style.animation = '';
+        hanger.style.transform = '';
+      }
+    }
+
+    bounceFrameId = requestAnimationFrame(step);
+  }
+
+  function startDrag(e) {
+    e.preventDefault();
+    if (bounceFrameId !== null) {
+      cancelAnimationFrame(bounceFrameId);
+      bounceFrameId = null;
+    }
+    dragging = true;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    dragDist = 0;
+    lastDx = 0;
+    lastDy = 0;
+    hanger.classList.add('dragging');
+    // freeze the idle sway so the dragged child's translate/rotate stays in
+    // screen-space instead of the hanger's currently tilted local axes
+    hanger.style.animation = 'none';
+    hanger.style.transform = 'translate(-50%, -50%) rotate(0deg)';
+    hook.style.transition = 'none';
+    frame.style.transition = 'none';
+    hookHeightCache = hook.getBoundingClientRect().height || hookHeightCache;
+    hanger.setPointerCapture(pointerId);
+  }
+
+  function moveDrag(e) {
+    if (!dragging || e.pointerId !== pointerId) return;
+    e.preventDefault();
+    let dx = e.clientX - startX;
+    let dy = e.clientY - startY;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > MAX_DRAG) {
+      const ratio = MAX_DRAG / dist;
+      dx *= ratio;
+      dy *= ratio;
+      dist = MAX_DRAG;
+    }
+    dragDist = dist;
+    lastDx = dx;
+    lastDy = dy;
+    applyStretch(dx, dy, dist);
+  }
+
+  function endDrag(e) {
+    if (!dragging || e.pointerId !== pointerId) return;
+    dragging = false;
+    const moved = dragDist;
+    settleBack(lastDx, lastDy);
+
+    if (moved < CLICK_THRESHOLD) {
+      registerClick();
+    }
+  }
+
+  hanger.addEventListener('pointerdown', startDrag);
+  window.addEventListener('pointermove', moveDrag);
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+  hanger.addEventListener('dragstart', (e) => e.preventDefault());
+
+  function spawnBillRain() {
+    const billCount = 40;
+    for (let i = 0; i < billCount; i++) {
+      const bill = document.createElement('img');
+      bill.src = 'naciobill.svg';
+      bill.className = 'bill';
+      bill.style.left = Math.random() * 100 + 'vw';
+      const duration = 3 + Math.random() * 2.5;
+      const spinDuration = duration * (0.6 + Math.random() * 0.8);
+      const delay = Math.random() * 1.5;
+      bill.style.animationDuration = duration + 's, ' + spinDuration + 's';
+      bill.style.animationDelay = delay + 's, ' + delay + 's';
+      billRain.appendChild(bill);
+      bill.addEventListener('animationend', () => bill.remove());
+    }
+  }
+
+  setTimeout(() => {
+    signature.classList.add('visible');
+  }, 9000);
+
+  function registerClick() {
+    clicks++;
+
+    if (clicks === 28 && !billsSpawned) {
+      billsSpawned = true;
+      spawnBillRain();
+    }
+
+    if (clicks >= 101) {
+      window.location.href = 'https://www.manzano.cc';
+    }
+  }
+</script>
+
+</body>
+</html>
