@@ -55,6 +55,7 @@
   .hook {
     display: block;
     width: 10px;
+    aspect-ratio: 21.187 / 17.305;
     margin: 0 auto;
     pointer-events: none;
     transform-origin: top center;
@@ -63,6 +64,7 @@
   .frame {
     display: block;
     width: 36px;
+    aspect-ratio: 62.583 / 75.748;
     margin-top: -1px;
     pointer-events: none;
     transform-origin: top center;
@@ -101,22 +103,17 @@
 
   .bill {
     position: absolute;
-    top: -120px;
-    width: 90px;
+    top: -60px;
+    width: 36px;
     opacity: 0.9;
-    animation-name: fall, spin;
+    animation-name: fall;
     animation-timing-function: linear;
     animation-iteration-count: 1;
   }
 
   @keyframes fall {
     from { transform: translateY(0); }
-    to   { transform: translateY(115vh); }
-  }
-
-  @keyframes spin {
-    from { rotate: 0deg; }
-    to   { rotate: 360deg; }
+    to   { transform: translateY(160vh); }
   }
 </style>
 </head>
@@ -151,6 +148,16 @@
   let dragDist = 0;
   let lastDx = 0;
   let lastDy = 0;
+  let sceneAngle = 0;
+
+  function getRotationDeg(el) {
+    const t = getComputedStyle(el).transform;
+    if (t === 'none') return 0;
+    const m = t.match(/matrix\(([^)]+)\)/);
+    if (!m) return 0;
+    const v = m[1].split(',').map(Number);
+    return Math.atan2(v[1], v[0]) * (180 / Math.PI);
+  }
 
   function applyStretch(dx, dy, dist) {
     const hookHeight = hookHeightCache;
@@ -200,9 +207,8 @@
       } else {
         applyStretch(0, 0, 0);
         bounceFrameId = null;
-        // resume the idle sway now that the hanger is back at rest
-        hanger.style.animation = '';
-        hanger.style.transform = '';
+        // resume the idle sway exactly where it was paused, no restart/jump
+        hanger.style.animationPlayState = 'running';
       }
     }
 
@@ -222,11 +228,12 @@
     dragDist = 0;
     lastDx = 0;
     lastDy = 0;
+    // freeze the idle sway exactly where it is (no snap) and remember the
+    // angle, so mouse movement can be converted into the hanger's tilted
+    // local axes instead of forcing the rotation to 0 and causing a jump
+    sceneAngle = getRotationDeg(hanger);
+    hanger.style.animationPlayState = 'paused';
     hanger.classList.add('dragging');
-    // freeze the idle sway so the dragged child's translate/rotate stays in
-    // screen-space instead of the hanger's currently tilted local axes
-    hanger.style.animation = 'none';
-    hanger.style.transform = 'translate(-50%, -50%) rotate(0deg)';
     hook.style.transition = 'none';
     frame.style.transition = 'none';
     hookHeightCache = hook.getBoundingClientRect().height || hookHeightCache;
@@ -236,8 +243,13 @@
   function moveDrag(e) {
     if (!dragging || e.pointerId !== pointerId) return;
     e.preventDefault();
-    let dx = e.clientX - startX;
-    let dy = e.clientY - startY;
+    const rawDx = e.clientX - startX;
+    const rawDy = e.clientY - startY;
+    // rotate the real screen-space movement into the hanger's local
+    // (possibly tilted) axes, so the frame always follows the cursor exactly
+    const rad = (-sceneAngle * Math.PI) / 180;
+    let dx = rawDx * Math.cos(rad) - rawDy * Math.sin(rad);
+    let dy = rawDx * Math.sin(rad) + rawDy * Math.cos(rad);
     let dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > MAX_DRAG) {
       const ratio = MAX_DRAG / dist;
@@ -269,19 +281,20 @@
   hanger.addEventListener('dragstart', (e) => e.preventDefault());
 
   function spawnBillRain() {
-    const billCount = 40;
+    const billCount = 80;
     for (let i = 0; i < billCount; i++) {
       const bill = document.createElement('img');
       bill.src = 'naciobill.svg';
       bill.className = 'bill';
       bill.style.left = Math.random() * 100 + 'vw';
       const duration = 3 + Math.random() * 2.5;
-      const spinDuration = duration * (0.6 + Math.random() * 0.8);
       const delay = Math.random() * 1.5;
-      bill.style.animationDuration = duration + 's, ' + spinDuration + 's';
-      bill.style.animationDelay = delay + 's, ' + delay + 's';
+      bill.style.animationDuration = duration + 's';
+      bill.style.animationDelay = delay + 's';
       billRain.appendChild(bill);
-      bill.addEventListener('animationend', () => bill.remove());
+      bill.addEventListener('animationend', (ev) => {
+        if (ev.animationName === 'fall') bill.remove();
+      });
     }
   }
 
@@ -292,7 +305,7 @@
   function registerClick() {
     clicks++;
 
-    if (clicks === 28 && !billsSpawned) {
+    if (clicks === 13 && !billsSpawned) {
       billsSpawned = true;
       spawnBillRain();
     }
